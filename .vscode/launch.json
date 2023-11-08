@@ -1,0 +1,28 @@
+{
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceRoot}/python"
+        },
+        {
+            "name": "JLink Debug",
+            "type": "cortex-debug",
+            "servertype": "jlink",
+            "request": "launch",
+            "executable": "${workspaceRoot}/build/ToiletMuzak.elf", // det här borde kanske inte vara hårdkodat
+            "device": "STM32F429ZI",
+            "interface": "swd",
+            "serverArgs": [
+                // "-gui"
+            ],
+            "cwd": "${fileDirname}",
+            "preLaunchTask": "Flash STM32"
+        }
+    ],
+    "version": "2.0.0"
+}

@@ -1,0 +1,1 @@
+.\JLinkGDBServerCL.exe -device STM32F429ZI -if swd -speed 4000

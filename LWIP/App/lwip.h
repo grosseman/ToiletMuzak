@@ -41,7 +41,8 @@
 #endif /* WITH_RTOS */
 
 /* USER CODE BEGIN 0 */
-
+#include "lwip/udp.h"
+void udp_recv_fn_callback(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 /* USER CODE END 0 */
 
 /* Global Variables ----------------------------------------------------------*/

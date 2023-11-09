@@ -50,7 +50,7 @@ enum I2S_STATE {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define RECV_BUF_SIZE 64000
-#define I2S_BUF_SIZE 2000
+#define I2S_BUF_SIZE 4000
 #define I2S_BUF_SIZE_HALF (I2S_BUF_SIZE/2)
 /* USER CODE END PD */
 
@@ -63,22 +63,22 @@ enum I2S_STATE {
 
 /* USER CODE BEGIN PV */
 enum GLOBAL_STATE global_state = STATE_IDLE;
-enum I2S_STATE i2s_state = STATE_NONE;
-bool i2s_data_available = false;
-
+volatile enum I2S_STATE i2s_state = STATE_NONE;
+volatile bool wav_data_available = false;
 
 struct {
   void* ptr;
   uint16_t len;
 } udp_payload;
-uint8_t *recv_buf_ptr;
-uint8_t *i2s_buf_ptr;
+uint8_t *recv_buf_ptr_write;
+uint8_t *recv_buf_ptr_read;
 
 uint8_t recv_buffer[RECV_BUF_SIZE];
 uint8_t i2s_buffer[I2S_BUF_SIZE];
 
 const int headerlen = 44;
 
+#pragma pack(1)
 typedef struct {
   unsigned char ckid_riff[4];
   unsigned int cksize;
@@ -108,17 +108,20 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void udp_recv_fn_callback(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
-  memcpy(recv_buf_ptr, p->payload, p->len);
-  recv_buf_ptr = (recv_buf_ptr+p->len >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr+p->len;  
-  i2s_data_available = true;
+  if (port != 1337) {
+    return;
+  }
+  memcpy(recv_buf_ptr_write, (uint8_t*)p->payload, p->len);
+  recv_buf_ptr_write = (recv_buf_ptr_write+p->len >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr_write+p->len;  
+  wav_data_available = false;
 }
 
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
-
+  i2s_state = STATE_HALFCPLT;
 }
 
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
-
+  i2s_state = STATE_CPLT;
 }
 /* USER CODE END 0 */
 
@@ -155,14 +158,19 @@ int main(void)
   MX_I2S2_Init();
   MX_LWIP_Init();
   /* USER CODE BEGIN 2 */
-  HAL_I2S_MspInit(&hi2s2);
+  
+  recv_buf_ptr_write = recv_buffer;
+  recv_buf_ptr_read = recv_buffer;
 
-  recv_buf_ptr = recv_buffer;
-  i2s_buf_ptr = recv_buffer;
+  int samples_counter = 0;
 
   // allocate memory for header
   wavhdr = (WAVEFILE_HDR*)malloc(sizeof(WAVEFILE_HDR));
 
+  // temp
+  memset(i2s_buffer, 0, I2S_BUF_SIZE);
+  HAL_I2S_MspInit(&hi2s2);
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -173,47 +181,74 @@ int main(void)
     switch (global_state)
     {
       case STATE_IDLE:
-        // turn off I2S
-        HAL_I2S_MspDeInit(&hi2s2);
-
-        if(i2s_data_available) {          
+        if(wav_data_available) {          
           global_state = STATE_INIT;
         } 
         break;
 
       case STATE_INIT:
         // here we assume that if we have just entered init, we are guaranteed to have at least WAVE header data available
-        memcpy((uint8_t*)wavhdr, recv_buf_ptr, sizeof(wavhdr));
-
+        memcpy((uint8_t*)wavhdr, recv_buf_ptr_read, sizeof(WAVEFILE_HDR));
+        recv_buf_ptr_read += sizeof(WAVEFILE_HDR);
         // copy initial wav data
-        if(recv_buf_ptr-recv_buffer >= I2S_BUF_SIZE) {
-          memcpy(i2s_buf_ptr, recv_buf_ptr, I2S_BUF_SIZE);
+        if(recv_buf_ptr_write-recv_buffer >= I2S_BUF_SIZE+sizeof(WAVEFILE_HDR)) {
+          memcpy(i2s_buffer, recv_buf_ptr_read, I2S_BUF_SIZE);
           global_state = STATE_START_I2S;
-          break;
+        } else {
+          global_state = STATE_FILL_BUF;
         }
+        break;
 
       case STATE_FILL_BUF:
-        if(recv_buf_ptr-recv_buffer < I2S_BUF_SIZE) {
+        if(recv_buf_ptr_write-recv_buffer < I2S_BUF_SIZE+sizeof(WAVEFILE_HDR)) {
           // not enough data received (yet?)
           global_state = STATE_FILL_BUF;
-          break;
+        } else {
+          memcpy(i2s_buffer, recv_buf_ptr_read, I2S_BUF_SIZE);
+          global_state = STATE_START_I2S;
         }
-        memcpy(i2s_buf_ptr, recv_buf_ptr, I2S_BUF_SIZE);
+        break;
 
       case STATE_START_I2S:
-        HAL_I2S_MspInit(&hi2s2);
-        global_state = STATE_PLAYING;
+        //HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*)i2s_buffer, I2S_BUF_SIZE_HALF);
+        //global_state = STATE_PLAYING;
+        break;
 
       case STATE_PLAYING:
+        switch (i2s_state) {
 
-        //global_state = STATE_IDLE;
-        //i2s_data_available = false;
+          case STATE_HALFCPLT:
+            memcpy(i2s_buffer, recv_buf_ptr_read, I2S_BUF_SIZE_HALF);            
+            recv_buf_ptr_read += I2S_BUF_SIZE_HALF;
+            i2s_state = STATE_NONE;
+            break;
+
+          case STATE_CPLT:
+            memcpy(i2s_buffer+I2S_BUF_SIZE_HALF, recv_buf_ptr_read, I2S_BUF_SIZE_HALF);
+            recv_buf_ptr_read = ( recv_buf_ptr_read+I2S_BUF_SIZE_HALF >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
+
+            samples_counter += I2S_BUF_SIZE;
+            
+            if (samples_counter >= wavhdr->datasize) {
+              samples_counter = 0;
+              HAL_I2S_DMAStop(&hi2s2);
+              global_state = STATE_IDLE;
+              wav_data_available = false;
+            }
+            i2s_state = STATE_NONE;
+            break;
+
+          case STATE_NONE:
+          default:
+            break;
+        }
         break;
     
       default:
         break;
     }
     /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */

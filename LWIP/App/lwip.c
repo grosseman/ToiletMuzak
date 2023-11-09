@@ -51,7 +51,7 @@ uint8_t NETMASK_ADDRESS[4];
 uint8_t GATEWAY_ADDRESS[4];
 
 /* USER CODE BEGIN 2 */
-
+struct udp_pcb* udp_ctr;
 /* USER CODE END 2 */
 
 /**
@@ -107,7 +107,12 @@ void MX_LWIP_Init(void)
   /* Create the Ethernet link handler thread */
 
 /* USER CODE BEGIN 3 */
-
+  udp_ctr = udp_new();
+  if (ERR_OK != udp_bind(udp_ctr, IP_ANY_TYPE, 1337)) {
+    Error_Handler();
+  }
+  udp_bind_netif(udp_ctr, &gnetif);
+  udp_recv(udp_ctr, udp_recv_fn_callback, NULL);
 /* USER CODE END 3 */
 }
 

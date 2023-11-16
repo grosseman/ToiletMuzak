@@ -33,6 +33,7 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 enum GLOBAL_STATE {
+  STATE_ERROR,
   STATE_IDLE,
   STATE_INIT,
   STATE_FILL_BUF,
@@ -76,7 +77,7 @@ uint8_t *recv_buf_ptr_read;
 uint8_t recv_buffer[RECV_BUF_SIZE];
 uint8_t i2s_buffer[I2S_BUF_SIZE];
 
-const int headerlen = 44;
+int num_samples_received = 0;
 
 #pragma pack(1)
 typedef struct {
@@ -112,8 +113,10 @@ void udp_recv_fn_callback(void *arg, struct udp_pcb *pcb, struct pbuf *p, const 
     return;
   }
   memcpy(recv_buf_ptr_write, (uint8_t*)p->payload, p->len);
-  recv_buf_ptr_write = (recv_buf_ptr_write+p->len >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr_write+p->len;  
-  wav_data_available = false;
+  recv_buf_ptr_write = (recv_buf_ptr_write+p->len >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer+sizeof(WAVEFILE_HDR) : recv_buf_ptr_write+p->len;
+  num_samples_received += p->len;
+  pbuf_free(p);
+  wav_data_available = true;
 }
 
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
@@ -210,8 +213,8 @@ int main(void)
         break;
 
       case STATE_START_I2S:
-        //HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*)i2s_buffer, I2S_BUF_SIZE_HALF);
-        //global_state = STATE_PLAYING;
+        HAL_I2S_Transmit_DMA(&hi2s2, (uint16_t*)i2s_buffer, I2S_BUF_SIZE_HALF);
+        global_state = STATE_PLAYING;
         break;
 
       case STATE_PLAYING:
@@ -219,16 +222,17 @@ int main(void)
 
           case STATE_HALFCPLT:
             memcpy(i2s_buffer, recv_buf_ptr_read, I2S_BUF_SIZE_HALF);            
-            recv_buf_ptr_read += I2S_BUF_SIZE_HALF;
+            recv_buf_ptr_read = (recv_buf_ptr_read+I2S_BUF_SIZE_HALF >= recv_buffer+num_samples_received) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
+  
             i2s_state = STATE_NONE;
             break;
 
           case STATE_CPLT:
-            memcpy(i2s_buffer+I2S_BUF_SIZE_HALF, recv_buf_ptr_read, I2S_BUF_SIZE_HALF);
-            recv_buf_ptr_read = ( recv_buf_ptr_read+I2S_BUF_SIZE_HALF >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
+            memcpy((uint8_t*)(i2s_buffer+I2S_BUF_SIZE_HALF), recv_buf_ptr_read, I2S_BUF_SIZE_HALF);
+            recv_buf_ptr_read = (recv_buf_ptr_read+I2S_BUF_SIZE_HALF >= recv_buffer+num_samples_received) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
 
-            samples_counter += I2S_BUF_SIZE;
-            
+            //samples_counter += I2S_BUF_SIZE;
+
             if (samples_counter >= wavhdr->datasize) {
               samples_counter = 0;
               HAL_I2S_DMAStop(&hi2s2);
@@ -243,7 +247,10 @@ int main(void)
             break;
         }
         break;
-    
+        
+      case STATE_ERROR:
+        break;
+
       default:
         break;
     }

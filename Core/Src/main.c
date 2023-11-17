@@ -113,7 +113,7 @@ void udp_recv_fn_callback(void *arg, struct udp_pcb *pcb, struct pbuf *p, const 
     return;
   }
   memcpy(recv_buf_ptr_write, (uint8_t*)p->payload, p->len);
-  recv_buf_ptr_write = (recv_buf_ptr_write+p->len >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer+sizeof(WAVEFILE_HDR) : recv_buf_ptr_write+p->len;
+  recv_buf_ptr_write = (recv_buf_ptr_write+p->len >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr_write+p->len;
   num_samples_received += p->len;
   pbuf_free(p);
   wav_data_available = true;
@@ -222,14 +222,14 @@ int main(void)
 
           case STATE_HALFCPLT:
             memcpy(i2s_buffer, recv_buf_ptr_read, I2S_BUF_SIZE_HALF);            
-            recv_buf_ptr_read = (recv_buf_ptr_read+I2S_BUF_SIZE_HALF >= recv_buffer+num_samples_received) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
+            recv_buf_ptr_read = (recv_buf_ptr_read+I2S_BUF_SIZE >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
   
             i2s_state = STATE_NONE;
             break;
 
           case STATE_CPLT:
             memcpy((uint8_t*)(i2s_buffer+I2S_BUF_SIZE_HALF), recv_buf_ptr_read, I2S_BUF_SIZE_HALF);
-            recv_buf_ptr_read = (recv_buf_ptr_read+I2S_BUF_SIZE_HALF >= recv_buffer+num_samples_received) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
+            recv_buf_ptr_read = (recv_buf_ptr_read+I2S_BUF_SIZE >= recv_buffer+RECV_BUF_SIZE) ? recv_buffer : recv_buf_ptr_read+I2S_BUF_SIZE_HALF;
 
             //samples_counter += I2S_BUF_SIZE;
 
